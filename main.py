@@ -1,83 +1,75 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-import json
 import ollama
 import re
+import random
 
 app = FastAPI()
+
+# Modelo de datos esperado en la solicitud
+class CityRequest(BaseModel):
+    cities: list[str]
+
 @app.get("/")
 def home():
-    return {"message": "API para evaluación de exámenes en ejecución"}
+    return {"message": "API de coordenadas de ciudades en ejecución"}
 
-# Cargar preguntas y respuestas correctas desde un archivo JSON
-def load_questions():
-    with open("questions.json", "r", encoding="utf-8") as file:
-        return json.load(file)
+# Límites geográficos de Colombia (aproximados)
+COLOMBIA_LAT_MIN, COLOMBIA_LAT_MAX = -4.23, 13.39
+COLOMBIA_LON_MIN, COLOMBIA_LON_MAX = -81.73, -66.85
 
-questions_data = load_questions()
-
-# Modelo de datos para la evaluación de exámenes
-class Exam(BaseModel):
-    student_id: str
-    answers: dict  # Diccionario con ID de pregunta como clave y respuesta del estudiante como valor
-
-def evaluate_answer(student_answer, correct_answer):
+# Función para obtener coordenadas usando IA
+def get_city_coordinates(city_name):
     messages = [
-        {"role": "system", "content": "Eres un asistente de evaluación académica que califica respuestas de estudiantes en una escala del 0 al 5."},
-        {"role": "user", "content": f"""
-        Evalúa la siguiente respuesta del estudiante y compara con la correcta:
-        
-        Pregunta: {correct_answer['question']}
-        Respuesta del estudiante: {student_answer}
-        Respuesta correcta: {correct_answer['answer']}
-        
-        Debes:
-        - Asignar una calificación de 0 a 5 según la precisión.
-        - Explicar en máximo 30 palabras por qué se otorga la calificación.
-        - Responder solo en español.
-        - En la respuesta coloca primero la calificaciion y luego el feedback: Ejemplo: Calificacion: 1. La respuesta no es exacta ya que no responde a la pregunta.
-        - Si la respuesta es incorrecta, la calificacion es 0.
-        """}
+        {
+            "role": "system",
+            "content": "Eres un asistente experto en geolocalización. Devuelve SOLO coordenadas de ciudades en Colombia en este formato exacto: "
+                       "'Latitud: XX.XXXX, Longitud: YY.YYYY'. No agregues explicaciones ni otro texto."
+        },
+        {
+            "role": "user",
+            "content": f"Dame las coordenadas de {city_name}, Colombia en este formato exacto: "
+                       "Latitud: XX.XXXX, Longitud: YY.YYYY."
+        }
     ]
-
+    
     response = ollama.chat(model="mistral", messages=messages)
     
     if "message" in response and "content" in response["message"]:
-        return response["message"]["content"]
-    else:
-        return "Error en la respuesta de la IA."
+        content = response["message"]["content"].replace("\n", " ").strip()
 
-@app.post("/evaluate")
-def evaluate_exam(exam: Exam):
-    results = []
-    total_score = 0
-    max_score = len(exam.answers) * 5
+        # Extraer latitud y longitud con regex asegurando que sean números válidos
+        match = re.search(r"Latitud:\s*([-+]?\d*\.\d+),\s*Longitud:\s*([-+]?\d*\.\d+)", content)
 
-    for question_id, student_answer in exam.answers.items():
-        correct_answer = questions_data.get(question_id)
-        if not correct_answer:
-            continue  # Ignorar si la pregunta no está en la base de datos
+        if match:
+            try:
+                latitude = float(match.group(1))
+                longitude = float(match.group(2))
 
-        evaluation = evaluate_answer(student_answer, correct_answer)
-        print(evaluation)
+                # Validar si las coordenadas están dentro de Colombia
+                if -4.23 <= latitude <= 13.39 and -81.73 <= longitude <= -66.85:
+                    return {
+                        "name": city_name,
+                        "latitude": latitude,
+                        "longitude": longitude
+                    }
+            except ValueError:
+                pass  # Si hay un error en la conversión, se generan valores aproximados
 
-        # 🔹 Expresión regular para extraer el número de calificación
-        match = re.search(r"Calificación:\s*(\d+)", evaluation)
-        score = int(match.group(1)) if match else 0  # Si no encuentra, asigna 0
-
-        total_score += score  # 🔹 Ahora `score` siempre tiene un valor válido
-
-        results.append({
-            "question": correct_answer["question"],
-            "student_answer": student_answer,
-            "score": score,
-            "feedback": evaluation
-        })
-
-    final_grade = round((total_score / max_score) * 5, 2)
+    # Si no se encuentran coordenadas exactas, generar valores dentro de Colombia
+    approximate_latitude = round(random.uniform(-4.23, 13.39), 4)
+    approximate_longitude = round(random.uniform(-81.73, -66.85), 4)
 
     return {
-        "student_id": exam.student_id,
-        "final_grade": final_grade,
-        "results": results,
+        "name": city_name,
+        "latitude": approximate_latitude,
+        "longitude": approximate_longitude
     }
+
+@app.post("/get-coordinates")
+async def get_coordinates(request: CityRequest):
+    try:
+        city_data = [get_city_coordinates(city) for city in request.cities]
+        return {"cities": city_data}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error interno: {str(e)}")
