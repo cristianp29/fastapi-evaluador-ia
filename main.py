@@ -1,26 +1,34 @@
-from fastapi import FastAPI, HTTPException
-from models.city_request import CityRequest
-from services import geocoder
+from fastapi import FastAPI
+from pydantic import BaseModel
+from contextlib import asynccontextmanager
+from services.geocoder import get_geocode  # Asegúrate de que esta función está bien implementada
 
-app = FastAPI()
+# Modelo para recibir las ciudades
+class CityRequest(BaseModel):
+    cities: list[str]  # Lista de nombres de ciudades recibidas en JSON
 
-@app.post("/geocode/")
-def geocode_cities(request: CityRequest):
-    city_data = []
+# Use lifespan for startup and shutdown tasks
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    print("Starting FastAPI application...")
+    yield  # App runs aquí
+    print("Shutting down FastAPI application...")
 
-    for city in request.cities:
-        corrected_city = geocoder.correct_city_name(city)
-        geo_info = geocoder.get_geocode(corrected_city)
-        
-        city_data.append({
+# Inicializa FastAPI con lifespan
+app = FastAPI(lifespan=lifespan)
+
+@app.post("/cities/")
+async def get_cities(city_request: CityRequest):
+    results = []
+    
+    for city in city_request.cities:
+        geo_data = get_geocode(city)  # Busca coordenadas en el geocoder
+        city_data = {
             "name": city,
-            "corrected_name": corrected_city,
-            "latitude": geo_info["latitude"] if geo_info else None,
-            "longitude": geo_info["longitude"] if geo_info else None
-        })
-
-    if not city_data:
-        raise HTTPException(status_code=404, detail="No se encontraron ubicaciones válidas.")
-
-    return {"cities": city_data}
-
+            "corrected_name": geo_data.get("corrected_name", city),
+            "latitude": geo_data.get("latitude"),
+            "longitude": geo_data.get("longitude")
+        }
+        results.append(city_data)
+    
+    return {"cities": results}

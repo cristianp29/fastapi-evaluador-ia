@@ -22,3 +22,7 @@ uvicorn==0.34.0
 requests==2.32.3
 RapidFuzz==3.12.2
 spacy
+fuzzywuzzy
+pandas
+pyspellchecker
+geopy
