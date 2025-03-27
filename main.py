@@ -1,23 +1,17 @@
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-from geocoder import correct_city_name, get_geocode  # Importamos las funciones
+from models.city_request import CityRequest
+from services import geocoder
 
 app = FastAPI()
 
-class CityRequest(BaseModel):
-    cities: list[str]
-
 @app.post("/geocode/")
 def geocode_cities(request: CityRequest):
-    """
-    Endpoint que recibe una lista de ciudades y devuelve sus coordenadas corregidas.
-    """
     city_data = []
 
     for city in request.cities:
-        corrected_city = correct_city_name(city)  # Corrige la ciudad
-        geo_info = get_geocode(corrected_city)  # Obtiene coordenadas
-
+        corrected_city = geocoder.correct_city_name(city)
+        geo_info = geocoder.get_geocode(corrected_city)
+        
         city_data.append({
             "name": city,
             "corrected_name": corrected_city,

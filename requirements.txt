@@ -19,3 +19,6 @@ starlette==0.46.1
 tqdm==4.67.1
 typing_extensions==4.12.2
 uvicorn==0.34.0
+requests==2.32.3
+RapidFuzz==3.12.2
+spacy
